@@ -753,7 +753,7 @@ async function afterLogin(user) {
   enterApp(data);
 }
 function pendingScreen(p) {
-  $('#root').innerHTML = `<div class="auth"><div class="box center"><h1>Waiting for approval</h1><p>Hello <b>${esc(p.full_name)}</b>. Your account (${esc(p.email)}) has been created but has not yet been activated and linked to a school.</p>
+  $('#root').innerHTML = `<div class="auth"><div class="box center"><h1>Email confirmed: awaiting approval</h1><p>Hello <b>${esc(p.full_name)}</b>. Your email (${esc(p.email)}) is confirmed. Your account is now waiting to be approved.</p>
   <p class="muted">Your school administrator will approve you. If that does not happen, ask the Ministry administrator to help.</p><button class="btn" id="a_out">Sign out</button></div></div>`;
 }
 document.addEventListener('click', async e => {
@@ -762,14 +762,14 @@ document.addEventListener('click', async e => {
   if (t.dataset.auth) { e.preventDefault(); return authScreen(t.dataset.auth); }
   await guard(async () => {
     const email = ($('#a_email') || {}).value, pass = ($('#a_pass') || {}).value;
-    if (t.id === 'a_login') { const lk = secLocked(); if (lk) return authScreen('login', `Too many failed attempts. Try again in ${lk} minute(s).`); const { data, error } = await sb.auth.signInWithPassword({ email, password: pass }); if (error) { secFail(email, 'sign-in'); return authScreen('login', error.message); } secOK(); afterLogin(data.user); }
+    if (t.id === 'a_login') { const lk = secLocked(); if (lk) return authScreen('login', `Too many failed attempts. Try again in ${lk} minute(s).`); const { data, error } = await sb.auth.signInWithPassword({ email, password: pass }); if (error) { if (/not confirmed/i.test(error.message)) return authScreen('login', 'Please click the confirmation link we emailed you, then sign in again.'); secFail(email, 'sign-in'); return authScreen('login', error.message); } secOK(); afterLogin(data.user); }
     if (t.id === 'a_signup') {
       if ((pass || '').length < 8) return toast('Password must be 8+ characters', true);
       const sch = ($('#a_school') || {}).value; if (!sch) return toast('Choose your school', true);
-      const { data, error } = await sb.auth.signUp({ email, password: pass, options: { data: { full_name: $('#a_name').value, phone: $('#a_phone').value } } });
+      const { data, error } = await sb.auth.signUp({ email, password: pass, options: { emailRedirectTo: location.href.split('#')[0], data: { full_name: $('#a_name').value, phone: $('#a_phone').value } } });
       if (error) return authScreen('signup', error.message);
       if (data.user) { try { await sb.rpc('request_join', { p_user: data.user.id, p_school: sch }); } catch { } }
-      if (data.session) afterLogin(data.user); else authScreen('login', 'Account created. Check your email to confirm, then sign in.');
+      if (data.session) afterLogin(data.user); else authScreen('login', 'Account created. We sent a confirmation link to ' + email + '. Click it, then sign in. After you confirm, your account waits for approval by your school administrator.');
     }
     if (t.id === 'a_reset') { const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.href.split('#')[0] }); authScreen('login', error ? error.message : 'Reset link sent. Check your email.'); }
     if (t.id === 'a_out') signOut();
@@ -1526,14 +1526,14 @@ PAGE_AFTER.subscription = el => {
     await loadLib('https://checkout.flutterwave.com/v3.js', 'FlutterwaveCheckout');
     const fw = FlutterwaveCheckout({ public_key: CFG.FLW_PUBLIC_KEY, tx_ref: 'LME-' + uid(), amount: p.amount, currency: 'ZMW', payment_options: SUBF.method === 'card' ? 'card' : 'mobilemoneyzambia',
       customer: { email: S.profile.email, phone_number: phone, name: S.profile.full_name || S.school.name }, customizations: { title: 'LME Termly Report Form System', description: `${p.name} subscription: ${S.school.name}` },
-      callback: r => { try { fw.close(); } catch { } if (/success|complet/i.test(r.status)) guard(async () => { await save('active', String(r.transaction_id || r.tx_ref)); toast('Payment received: subscription active'); }); else toast('Payment was not completed', true); } }); });
+      callback: r => { try { fw.close(); } catch { } if (/success|complet/i.test(r.status)) guard(async () => { await save('pending', String(r.transaction_id || r.tx_ref)); toast('Payment sent. Your subscription starts once the Ministry confirms it.'); }); else toast('Payment was not completed', true); } }); });
   const mn = $('#sbManual', el); if (mn) mn.onclick = () => guard(async () => { const ref = $('#sbRef').value.trim(); if (ref.length < 4) return toast('Enter the transaction ID from your payment SMS', true); lsSet('lme_subphone', ph()); await save('pending', ref); toast('Submitted. The Ministry will confirm your payment.'); });
 };
 
 async function schoolSubOK() {
   if (!CFG.REQUIRE_SUBSCRIPTION || !S.school || !['school_admin', 'teacher'].includes(role())) return true;
   if (S._subAt && Date.now() - S._subAt < 30000 && S._subSch === S.school.id) return S._subOK;
-  try { S._subOK = !!activeSub(await DB.select('subscriptions', { school_id: S.school.id })); } catch { S._subOK = true; }
+  try { S._subOK = !!activeSub(await DB.select('subscriptions', { school_id: S.school.id })); } catch { S._subOK = !LIVE; }
   S._subAt = Date.now(); S._subSch = S.school.id; return S._subOK;
 }
 
@@ -1685,7 +1685,7 @@ const ADMIN_TAB = {
     ${isSuper() ? `<select id="us">${optList(S.schools.map(s => [s.id, s.name]), ADMIN_F.school, 'All schools')}</select>` : ''}<select id="ust">${optList([['pending', 'Pending approval'], ['active', 'Active']], ADMIN_F.status, 'All statuses')}</select></div>
     <div class="tw"><table class="zebra"><thead><tr><th>NAME</th><th>EMAIL</th><th>PHONE</th><th>ROLE</th><th>SCHOOL</th><th>STATUS</th><th></th></tr></thead><tbody>
     ${list.map(u => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td><span class="pill ${u.role === 'super_admin' ? 'bad' : u.role === 'school_admin' ? 'warn' : 'mute'}">${esc(u.role.replace('_', ' '))}</span></td><td>${esc(sName(u.school_id))}</td><td><span class="pill ${u.active ? 'ok' : 'warn'}">${u.active ? 'Active' : 'Pending'}</span></td>
-    <td>${isAnc(u.id) ? '' : '<button class="btn ghost sm" data-eu="' + u.id + '">Edit</button>'} ${u.id !== S.profile.id && !isAnc(u.id) && (isSuper() || u.role === 'teacher') ? '<button class="btn ghost sm" data-xu="' + u.id + '">Delete</button>' : ''} ${!u.active ? `<button class="btn gold sm" data-au="${u.id}">Approve</button>` : u.id !== S.profile.id && !isAnc(u.id) ? `<button class="btn ghost sm" data-du="${u.id}">Deactivate</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted center">No users match.</td></tr>'}</tbody></table></div>
+    <td>${isAnc(u.id) ? '' : '<button class="btn ghost sm" data-eu="' + u.id + '">Edit</button>'} ${u.id !== S.profile.id && !isAnc(u.id) && (isSuper() || u.role === 'teacher') ? '<button class="btn ghost sm" data-xu="' + u.id + '">Delete</button>' : ''} ${!u.active ? (u.email_confirmed ? '<span class="pill ok">Email confirmed</span> ' : '<span class="pill mute">Email not confirmed</span> ') + (u.email_confirmed || isSuper() ? `<button class="btn gold sm" data-au="${u.id}">Approve</button>` : '') : u.id !== S.profile.id && !isAnc(u.id) ? `<button class="btn ghost sm" data-du="${u.id}">Deactivate</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted center">No users match.</td></tr>'}</tbody></table></div>
     ${isSuper() ? '<p class="muted">Super administrators: <b>' + adminUsers.filter(u => u.role === 'super_admin').length + ' of 3</b>. A super administrator cannot remove or demote the one who added them.</p>' : ''}<p class="muted" style="margin-bottom:0">${LIVE ? 'People can also sign up themselves; they appear as <b>Pending</b> until you approve them and give them a school and role.' : 'Demo mode: users are created instantly.'}</p></div>`;
   },
   permissions: async () => {
