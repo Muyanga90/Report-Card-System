@@ -1477,7 +1477,7 @@ const subHistory = (subs, withSchool) => `<div class="tw"><table class="zebra"><
   ${withSchool ? `<td>${x.status === 'pending' ? `<button class="btn gold sm" data-sa="approve:${x.id}">Approve</button> <button class="btn ghost sm" data-sa="reject:${x.id}">Reject</button>` : x.status === 'active' ? `<button class="btn ghost sm" data-sa="revoke:${x.id}">Revoke</button>` : ''}</td>` : ''}</tr>`).join('') || `<tr><td colspan="9" class="muted center">No payments yet.</td></tr>`}</tbody></table></div>`;
 PAGE_FN.subscription = async () => {
   await loadPlans();
-  const head = pageHead('Subscription', isSuper() ? 'Approve payments and see which schools are subscribed.' : `${esc(S.school.name)}: subscribe or renew with mobile money or card.`); let subs;
+  const head = pageHead('Subscription', isSuper() ? 'Approve payments and see which schools are subscribed.' : `${esc(S.school.name)}: subscribe or renew with mobile money or card.`, isSuper() ? '<button class="btn gold" id="goFree">+ Give free access</button>' : ''); let subs;
   try { subs = await DB.select('subscriptions', isSuper() ? {} : { school_id: S.school.id }); } catch { return head + '<div class="note err"><b>Subscriptions are not set up yet.</b> Create the <code>subscriptions</code> table in Supabase (the SQL is at the top of the subscription code in index.html), then reload.</div>'; }
   subs.sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   if (isSuper()) { const rows = S.schools.map(x => ({ x, a: activeSub(subs.filter(k => k.school_id === x.id)) })), pend = subs.filter(k => k.status === 'pending');
@@ -1498,6 +1498,7 @@ PAGE_FN.subscription = async () => {
 PAGE_AFTER.subscription = el => {
   if (isSuper()) {
     el.addEventListener('click', e => {
+      if (e.target.closest('#goFree')) { adminTab = 'free'; location.hash = '#/admin'; return; }
       if (e.target.closest('#pedAdd')) $('#pedBody', el).insertAdjacentHTML('beforeend', pedRow({ id: 'p' + Date.now().toString(36), name: '', months: 12, amount: 1000 }));
       const d = e.target.closest('[data-pdel]'); if (d) d.closest('tr').remove();
       if (e.target.closest('#pnSave')) guard(async () => {
@@ -1663,12 +1664,24 @@ const userForm = (u = {}, isNew) => `<div class="grid2"><div class="field"><labe
  ${isNew ? '' : '<div class="field chk"><input type="checkbox" name="active" ' + (u.active ? 'checked' : '') + '><label>Account active</label></div>'}</div>`;
 async function loadUsers() { adminUsers = await DB.select('profiles', isSuper() ? {} : { school_id: S.school.id }); }
 PAGE_FN.admin = async () => {
-  if (!isSuper() && ['schools', 'permissions'].includes(adminTab)) adminTab = 'overview';
+  if (!isSuper() && ['schools', 'permissions', 'free'].includes(adminTab)) adminTab = 'overview';
   await loadUsers(); const pending = adminUsers.filter(u => !u.active).length;
-  const tabs = [['overview', 'Overview'], ...(isSuper() ? [['schools', `Schools (${S.schools.length})`]] : []), ['users', `Users${pending ? ` · ${pending} pending` : ''}`], ...(isSuper() ? [['permissions', 'Admin permissions']] : []), ['audit', 'Activity log']];
+  const tabs = [['overview', 'Overview'], ...(isSuper() ? [['schools', `Schools (${S.schools.length})`], ['free', 'Free access']] : []), ['users', `Users${pending ? ` · ${pending} pending` : ''}`], ...(isSuper() ? [['permissions', 'Admin permissions']] : []), ['audit', 'Activity log']];
   const body = await ADMIN_TAB[adminTab]();
   return pageHead('Admin Desk', isSuper() ? 'Ministry control panel: schools, teachers, administrators and access.' : 'School control panel: teachers, administrators and access.') + `<div class="tabs noprint">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${k === adminTab ? 'on' : ''}">${l}</button>`).join('')}</div>${body}`;
 };
+/* ---- FREE ACCESS: people sign up themselves (own name, email, password); the super administrator gives them free access, chooses their plan, and can delete them ---- */
+const FREE_TYPES = [['school_admin', 'School administrator'], ['district_admin', 'District education office'], ['ministry_admin', 'Ministry of Education']];
+const freeTypeName = k => (FREE_TYPES.find(x => x[0] === k) || [0, k])[1];
+const planLen = p => p.lifetime ? 'Lifetime' : (p.months % 12 === 0 ? (p.months / 12) + ' year' + (p.months / 12 > 1 ? 's' : '') : p.months + ' months');
+let FREE = [];
+async function loadFree() { try { const r = (await DB.select('site_images', { kind: 'freeaccess' })).sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).pop(); FREE = (r && JSON.parse(r.data)) || []; } catch { FREE = []; } }
+const saveFree = async list => { await saveKind('freeaccess', list); FREE = list; };
+const freeForm = (people, pick) => `<p class="muted" style="margin-top:0">The person has already registered with their own name, email and password. Choose what they are and which free plan they get.</p>
+  <div class="grid2"><div class="field" style="grid-column:1/-1"><label>Person *</label><select name="uid">${optList(people.map(u => [u.id, `${u.full_name || '(no name)'} – ${u.email}${u.active ? '' : ' (waiting for approval)'}`]), pick, '— choose a registered person —')}</select></div>
+  <div class="field"><label>Give access as *</label><select name="ftype">${optList(FREE_TYPES, 'school_admin')}</select></div>
+  <div class="field"><label>Free plan *</label><select name="plan">${optList(PLANS().map(p => [p.id, `${p.name} (${planLen(p)}) – FREE`]), PLANS()[0].id)}</select></div>
+  <div class="field" id="ftSchW" style="grid-column:1/-1"><label id="ftSchL">School *</label><select name="school_id">${optList(S.schools.map(s => [s.id, s.name + (s.district ? ' – ' + s.district : '')]), (people.find(u => u.id === pick) || {}).school_id || (S.school && S.school.id), '— choose —')}</select></div></div>`;
 const ADMIN_TAB = {
   overview: async () => {
     const [ls, cs] = [S.learners.length, S.classes.length], steps = [...(isSuper() ? [[S.schools.length > 0, 'Add a school', 'schools']] : []), [adminUsers.some(u => u.role === 'school_admin'), 'Add a school administrator / head teacher', 'users'], [adminUsers.some(u => u.role === 'teacher'), 'Add teachers', 'users'], [cs > 0, 'Add classes (Classes page)', null], [ls > 0, 'Add learners (Results Entry)', null]];
@@ -1678,6 +1691,18 @@ const ADMIN_TAB = {
   schools: async () => `<div class="card"><div class="row" style="margin-bottom:8px"><button class="btn gold" id="addS">+ Add school</button><button class="btn ghost" id="impS">Import schools (paste list)</button></div><div class="tw"><table class="zebra"><thead><tr><th>SCHOOL</th><th>EMIS CODE</th><th>PROVINCE</th><th>DISTRICT</th><th>HEAD TEACHER</th><th>STATUS</th><th></th></tr></thead><tbody>
     ${S.schools.map(s => `<tr class="${S.school && s.id === S.school.id ? 'on-class' : ''}"><td><b>${esc(s.name)}</b></td><td>${esc(s.code)}</td><td>${esc(s.province)}</td><td>${esc(s.district)}</td><td>${esc(s.head_teacher)}</td><td><span class="pill ${s.active ? 'ok' : 'mute'}">${s.active ? 'Active' : 'Inactive'}</span></td>
     <td><button class="btn ghost sm" data-open="${s.id}">Open</button> <button class="btn ghost sm" data-fa="${s.id}">Free access</button> <button class="btn ghost sm" data-es="${s.id}">Edit</button> <button class="btn ghost sm" data-ds="${s.id}">Delete</button></td></tr>`).join('') || '<tr><td colspan="7" class="muted center">No schools yet. Add the first one.</td></tr>'}</tbody></table></div></div>`,
+  free: async () => {
+    await loadFree(); const sch = id => S.schools.find(x => x.id === id) || {}, given = new Set(FREE.map(f => f.user_id));
+    const waiting = adminUsers.filter(u => u.role !== 'super_admin' && !given.has(u.id) && !u.active);
+    const st = f => f.ends_on >= '9999' ? ['Lifetime', 'ok'] : f.ends_on < todayStr() ? ['Expired', 'bad'] : ['Active', 'ok'];
+    return `<div class="card"><div class="row" style="margin-bottom:8px"><button class="btn gold" id="addFree">+ Give free access</button><span class="muted">People register themselves with <b>Create account</b>. Give them free access here and choose their plan.</span></div>
+    <div class="kpis"><div class="kpi"><b>${FREE.filter(f => f.type === 'school_admin').length}</b><span>School administrators</span></div><div class="kpi"><b>${FREE.filter(f => f.type === 'district_admin').length}</b><span>District offices</span></div><div class="kpi"><b>${FREE.filter(f => f.type === 'ministry_admin').length}</b><span>Ministry</span></div><div class="kpi"><b>${waiting.length}</b><span>Waiting for approval</span></div></div>
+    ${waiting.length ? `<h3>Registered and waiting for you</h3><div class="tw" style="margin-bottom:14px"><table class="zebra"><thead><tr><th>NAME</th><th>EMAIL</th><th>PHONE</th><th>SCHOOL THEY CHOSE</th><th></th></tr></thead><tbody>${waiting.map(u => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td>${esc(sch(u.school_id).name || '—')}</td><td><button class="btn gold sm" data-fgive="${esc(u.id)}">Give free access</button> <button class="btn danger sm" data-fxu="${esc(u.id)}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+    <h3>Free access accounts</h3><div class="tw"><table class="zebra"><thead><tr><th>NAME</th><th>EMAIL</th><th>TYPE</th><th>SCHOOL / DISTRICT</th><th>FREE PLAN</th><th>ENDS</th><th>STATUS</th><th></th></tr></thead><tbody>
+    ${FREE.map(f => { const gone = !adminUsers.some(u => u.id === f.user_id), s = st(f), x = sch(f.school_id);
+      return `<tr><td><b>${esc(f.name)}</b></td><td>${esc(f.email)}</td><td><span class="pill ${f.type === 'ministry_admin' ? 'bad' : f.type === 'district_admin' ? 'warn' : 'mute'}">${esc(freeTypeName(f.type))}</span></td><td>${f.type === 'ministry_admin' ? '—' : f.type === 'district_admin' ? esc(x.district || x.name || '—') : esc(x.name || '—')}</td><td>${esc(f.plan_name)} <span class="pill ok">FREE</span></td><td>${endLabel(f.ends_on)}</td><td>${gone ? '<span class="pill mute">Account removed</span>' : `<span class="pill ${s[1]}">${s[0].toUpperCase()}</span>`}</td><td><button class="btn danger sm" data-fdel="${esc(f.user_id)}">Delete</button></td></tr>`; }).join('') || '<tr><td colspan="8" class="muted center">No free-access accounts yet.</td></tr>'}</tbody></table></div>
+    <p class="muted" style="margin-bottom:0">Delete removes the person\'s login and ends their free access, for example if they misbehave.</p></div>`;
+  },
   users: async () => {
     const sName = id => (S.schools.find(s => s.id === id) || {}).name || '—';
     const list = adminUsers.filter(u => (!ADMIN_F.q || (u.full_name + u.email).toLowerCase().includes(ADMIN_F.q.toLowerCase())) && (!ADMIN_F.role || u.role === ADMIN_F.role) && (!ADMIN_F.school || u.school_id === ADMIN_F.school) && (!ADMIN_F.status || (ADMIN_F.status === 'pending' ? !u.active : u.active)));
@@ -1705,7 +1730,25 @@ PAGE_AFTER.admin = el => {
   el.onclick = async e => {
     const t = e.target.closest('button'); if (!t) return; const d = t.dataset;
     if (d.tab) { adminTab = d.tab; return route(); }
-    if ((t.id === 'addS' || t.id === 'impS' || t.id === 'permSave' || d.es || d.ds || d.fa || d.pset) && !isSuper()) return toast('Only the Ministry super administrator can do this', true);
+    if ((t.id === 'addS' || t.id === 'impS' || t.id === 'permSave' || t.id === 'addFree' || d.fgive || d.fdel || d.fxu || d.es || d.ds || d.fa || d.pset) && !isSuper()) return toast('Only the Ministry super administrator can do this', true);
+    if (t.id === 'addFree' || d.fgive) { await loadFree(); const given = new Set(FREE.map(f => f.user_id)), people = adminUsers.filter(u => u.role !== 'super_admin' && !given.has(u.id)).sort((a, b) => (a.active - b.active) || String(a.full_name).localeCompare(String(b.full_name)));
+      if (!people.length) return toast('Nobody has registered yet. Ask them to press Create account on the sign-in page.', true);
+      modal({ title: 'Give free access', wide: true, ok: 'Give free access', body: freeForm(people, d.fgive || ''), onOk: async m => {
+        const f = formData(m), u = people.find(x => x.id === f.uid); if (!u) { toast('Choose the person', true); return false; }
+        const school_id = f.ftype === 'ministry_admin' ? null : (f.school_id || null); if (f.ftype !== 'ministry_admin' && !school_id) { toast('Choose a school', true); return false; }
+        const plan = PLANS().find(p => p.id === f.plan) || PLANS()[0];
+        await DB.update('profiles', u.id, { role: f.ftype, school_id, active: true });
+        let per, sub_id = null;
+        if (f.ftype === 'school_admin') { per = periodFor(await DB.select('subscriptions', { school_id }), plan); const r = await DB.insert('subscriptions', { school_id, plan: plan.id, amount: 0, currency: 'ZMW', method: 'free', phone: '', reference: 'FREE-' + todayStr(), status: 'active', ...per, created_by: S.profile.id }); sub_id = r && r[0] ? r[0].id : null; }
+        else per = periodFor([], plan);
+        await saveFree([...FREE, { user_id: u.id, name: u.full_name || u.email, email: u.email, type: f.ftype, school_id, plan_id: plan.id, plan_name: plan.name, starts_on: per.starts_on, ends_on: per.ends_on, sub_id, added_on: todayStr() }]);
+        await DB.audit('free.add', `${u.email} (${f.ftype}) ${plan.name}`); S._subAt = 0; toast('Free access given to ' + (u.full_name || u.email)); route(); } });
+      const root = $('#modalRoot'), ty = $('[name="ftype"]', root), sync = () => { $('#ftSchW', root).classList.toggle('hidden', ty.value === 'ministry_admin'); $('#ftSchL', root).textContent = ty.value === 'district_admin' ? 'A school in their district *' : 'School *'; }; ty.onchange = sync; sync(); return; }
+    if (d.fxu) { const u = adminUsers.find(x => x.id === d.fxu); if (u && await confirmBox(`Delete ${u.full_name || u.email} permanently? Their login will stop working.`, 'Delete')) guard(async () => { await manageUser(u.id, 'delete'); await DB.audit('user.delete', u.email); toast('Deleted'); route(); }); return; }
+    if (d.fdel) { await loadFree(); const f = FREE.find(x => x.user_id === d.fdel); if (!f) return; if (await confirmBox(`Delete ${f.name} (${freeTypeName(f.type)}) and end their free access? Their login will stop working.`, 'Delete')) guard(async () => {
+        if (adminUsers.some(u => u.id === f.user_id)) await manageUser(f.user_id, 'delete');
+        if (f.sub_id) { try { await DB.update('subscriptions', f.sub_id, { status: 'revoked' }); } catch { } }
+        await saveFree(FREE.filter(x => x.user_id !== f.user_id)); await DB.audit('free.delete', f.email); S._subAt = 0; toast('Deleted ' + f.name); route(); }); return; }
     if (d.pset) { const [uid, on] = d.pset.split(':'); $$(`tr[data-uid="${uid}"] [data-p]`, el).forEach(c => c.checked = on === '1'); return; }
     if (t.id === 'permSave') return guard(async () => { const m = Object.assign({}, PERMS); $$('tr[data-uid]', el).forEach(tr => { m[tr.dataset.uid] = {}; $$('[data-p]', tr).forEach(c => m[tr.dataset.uid][c.dataset.p] = c.checked); }); await saveKind('perms', m); PERMS = m; await DB.audit('perms.edit', 'admin permissions updated'); toast('Permissions saved'); route(); });
     if (t.id === 'addS') modal({ title: 'Add school', wide: true, body: schoolForm(), onOk: async m => { const f = formData(m); if (!f.name) { toast('School name is required', true); return false; } const [s] = await DB.insert('schools', schoolPayload(f)); await DB.audit('school.add', f.name); if (!S.school) await setWorkingSchool(s.id); await refresh(); toast('School added'); } });
