@@ -535,18 +535,18 @@ function printHTML(html) { const p = $('#printArea'); p.innerHTML = html; applyT
 /* ---------------- STATE ---------------- */
 const S = {
   profile: null, school: null, schools: [], staff: [], classes: [], subjects: [], learners: [], scale: [],
-  classTerms: [], transfers: [], returns: [], results: new Map(), allResults: null,
+  classTerms: [], transfers: [], results: new Map(), allResults: null,
   ctx: Object.assign({ classId: null, term: 3, year: new Date().getFullYear() }, lsGet('lme_ctx', {}))
 };
 const role = () => S.profile && S.profile.role;
-const isDO = () => role() === 'district_admin';
-const pageOK = p => isDO() ? ['tracker', 'district'].includes(p.k) : ((p.r.includes('*') || p.r.includes(role())) && !(role() === 'school_admin' && PAGE_PERM[p.k] && !can(PAGE_PERM[p.k])));
+const isDO = () => role() === 'district_admin', isMin = () => role() === 'ministry_admin', isOver = () => isDO() || isMin();
+const pageOK = p => isOver() ? p.k === 'overview' : ((p.r.includes('*') || p.r.includes(role())) && !(role() === 'school_admin' && PAGE_PERM[p.k] && !can(PAGE_PERM[p.k])));
 const isSuper = () => role() === 'super_admin';
 const isAdmin = () => role() === 'super_admin' || role() === 'school_admin';
-const PERM_LIST = [['manage_classes', 'Add / edit / delete classes'], ['manage_learners', 'Add / edit / delete learners, upload class lists'], ['manage_marks', 'Edit any teacher\'s marks, lock / unlock'], ['edit_subjects', 'Edit subjects, teachers and school details'], ['edit_scale', 'Edit grading scale'], ['manage_users', 'Admin Desk: add / approve users, upload staff'], ['transfers', 'Transfer learners and print certificates'], ['submit_returns', 'Submit school returns'], ['edit_stamp', 'Set the official date stamp on report cards']];
-const DEFAULT_PERMS = { manage_classes: true, manage_learners: true, manage_marks: true, edit_subjects: true, edit_scale: true, manage_users: true, transfers: true, submit_returns: true, edit_stamp: true, edit_text: false };
+const PERM_LIST = [['manage_classes', 'Add / edit / delete classes'], ['manage_learners', 'Add / edit / delete learners, upload class lists'], ['manage_marks', 'Edit any teacher\'s marks, lock / unlock'], ['edit_subjects', 'Edit subjects, teachers and school details'], ['edit_scale', 'Edit grading scale'], ['manage_users', 'Admin Desk: add / approve users, upload staff'], ['transfers', 'Transfer learners and print certificates'], ['edit_stamp', 'Set the official date stamp on report cards']];
+const DEFAULT_PERMS = { manage_classes: true, manage_learners: true, manage_marks: true, edit_subjects: true, edit_scale: true, manage_users: true, transfers: true, edit_stamp: true, edit_text: false };
 let PERMS = {};
-const PAGE_PERM = { transfers: 'transfers', returns: 'submit_returns', admin: 'manage_users' };
+const PAGE_PERM = { transfers: 'transfers', admin: 'manage_users' };
 const can = k => { if (isSuper()) return true; if (role() !== 'school_admin') return false; const u = PERMS[S.profile.id]; return u && k in u ? !!u[k] : !!DEFAULT_PERMS[k]; };
 const scaleArr = () => (S.scale.length ? S.scale.map(s => ({ ...s, grade: +s.grade, min_mark: +s.min_mark })).sort((a, b) => a.grade - b.grade) : DEFAULT_SCALE);
 const curClass = () => S.classes.find(c => c.id === S.ctx.classId) || null;
@@ -601,11 +601,7 @@ function seedDemo() {
     marks.forEach((m, k) => results.push({ id: uid(), school_id: 's1', learner_id: id, subject_id: `c1_s${k + 1}`, term: 3, year: 2026, mark: m === 'AB' ? null : m, absent: m === 'AB' }));
   });
   const classTerms = [{ id: uid(), school_id: 's1', class_id: 'c1', term: 3, year: 2026, next_term_opens: '2027-01-12', date_issued: '2026-11-13' }];
-  const returns = [
-    ['s2', 'Lusaka', 1, 'A', 42, 38, 40, 31, 55.2], ['s2', 'Lusaka', 3, 'B', 0, 44, 44, 39, 58.1],
-    ['s3', 'Copperbelt', 1, 'A', 35, 12, 47, 30, 49.4], ['s3', 'Copperbelt', 3, 'C', 30, 9, 39, 27, 53.7]
-  ].map(r => ({ id: uid(), school_id: r[0], class_id: null, year: 2026, term: 3, form: r[2], class_name: r[3], boys: r[4], girls: r[5], assessed: r[6], passed: r[7], mean_mark: r[8], submitted_at: T }));
-  return { schools: sch, profiles, grading_scale: scale, classes, class_subjects: subjects, learners, results, class_terms: classTerms, transfers: [], school_returns: returns, audit_log: [] };
+  return { schools: sch, profiles, grading_scale: scale, classes, class_subjects: subjects, learners, results, class_terms: classTerms, transfers: [], audit_log: [] };
 }
 let demo = null;
 function demoLoad() { demo = lsGet('lme_demo_v2', null); if (!demo) { demo = seedDemo(); demoSave(); } if (!demo.subscriptions) { demo.subscriptions = []; demoSave(); } if (!demo.site_images) { demo.site_images = []; demoSave(); } if (!demo.transfer_requests) { demo.transfer_requests = []; demoSave(); } if (!demo.profiles.find(p => p.id === 'd1')) { demo.profiles.push({ id: 'd1', email: 'district@demo.zm', full_name: 'District Education Officer', role: 'district_admin', school_id: 's1', active: true, created_at: '2026-01-01T00:00:00Z' }); demoSave(); } }
@@ -681,11 +677,11 @@ const DB = {
 async function loadSchools() { S.schools = await DB.select('schools', {}, 'name'); }
 async function loadSchoolData() {
   const id = S.school.id;
-  const [classes, subjects, learners, scale, ct, tr, ret, staff] = await Promise.all([
+  const [classes, subjects, learners, scale, ct, tr, staff] = await Promise.all([
     DB.select('classes', { school_id: id }, 'form'), DB.select('class_subjects', { school_id: id }), DB.select('learners', { school_id: id }),
     DB.select('grading_scale', { school_id: id }), DB.select('class_terms', { school_id: id }), DB.select('transfers', { school_id: id }),
-    DB.select('school_returns', { school_id: id }), DB.select('profiles', { school_id: id })]);
-  Object.assign(S, { classes, subjects, learners, scale, classTerms: ct, transfers: tr, returns: ret, staff });
+    DB.select('profiles', { school_id: id })]);
+  Object.assign(S, { classes, subjects, learners, scale, classTerms: ct, transfers: tr, staff });
   if (!S.classes.find(c => c.id === S.ctx.classId)) S.ctx.classId = S.classes[0] ? S.classes[0].id : null;
   await loadResults();
 }
@@ -716,7 +712,7 @@ function authScreen(mode = 'login', msg = '') {
       <div class="field"><label>Password</label><input id="a_pass" type="password" autocomplete="current-password"></div>
       <button class="btn gold" style="width:100%" id="a_login">Sign in</button>
       <p class="row" style="justify-content:space-between;margin-bottom:0"><a href="#" data-auth="signup">Create account</a><a href="#" data-auth="reset">Forgot password?</a></p>`,
-    signup: `<div class="field"><label>Full name</label><input id="a_name"></div><div class="field"><label>Phone</label><input id="a_phone"></div>
+    signup: `<div class="field"><label>Full name</label><input id="a_name"></div><div class="field"><label>Phone</label><input id="a_phone"></div><div class="field"><label>Your school *</label><select id="a_school"><option value="">Loading…</option></select></div>
       <div class="field"><label>Email</label><input id="a_email" type="email"></div><div class="field"><label>Password (8+ characters)</label><input id="a_pass" type="password"></div>
       <button class="btn gold" style="width:100%" id="a_signup">Create account</button><p><a href="#" data-auth="login">&larr; Back to sign in</a></p>`,
     reset: `<div class="field"><label>Email</label><input id="a_email" type="email"></div><button class="btn gold" style="width:100%" id="a_reset">Send reset link</button><p><a href="#" data-auth="login">&larr; Back</a></p>`
@@ -724,6 +720,7 @@ function authScreen(mode = 'login', msg = '') {
   $('#root').innerHTML = `<div class="auth"><div class="box"><div class="logo"><small>REPUBLIC OF ZAMBIA &middot; MINISTRY OF EDUCATION</small><h1>Termly Report Form System</h1></div>
     ${msg ? `<div class="note">${esc(msg)}</div>` : ''}${demoBtns}${LIVE || mode !== 'login' ? f : ''}
     <hr style="margin:16px 0;border:0;border-top:1px solid var(--line)"><div class="center"><a href="#/menu" class="btn ghost" style="text-decoration:none;display:inline-block">&larr; Back to main menu</a></div></div></div>`; applyMedia();
+  if (mode === 'signup' && LIVE) sb.rpc('public_schools').then(({ data }) => { const el = $('#a_school'); if (el) el.innerHTML = '<option value="">— choose your school —</option>' + (data || []).map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join(''); });
 }
 async function enterApp(profile) {
   S.profile = profile; await loadSchools(); _media = null; PERMS = (await getMedia()).perms || {};
@@ -757,7 +754,7 @@ async function afterLogin(user) {
 }
 function pendingScreen(p) {
   $('#root').innerHTML = `<div class="auth"><div class="box center"><h1>Waiting for approval</h1><p>Hello <b>${esc(p.full_name)}</b>. Your account (${esc(p.email)}) has been created but has not yet been activated and linked to a school.</p>
-  <p class="muted">Ask your school administrator or the Ministry administrator to approve you in the Admin Desk.</p><button class="btn" id="a_out">Sign out</button></div></div>`;
+  <p class="muted">Your school administrator will approve you. If that does not happen, ask the Ministry administrator to help.</p><button class="btn" id="a_out">Sign out</button></div></div>`;
 }
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-demo],[data-auth],#a_login,#a_signup,#a_reset,#a_out'); if (!t) return;
@@ -768,8 +765,10 @@ document.addEventListener('click', async e => {
     if (t.id === 'a_login') { const lk = secLocked(); if (lk) return authScreen('login', `Too many failed attempts. Try again in ${lk} minute(s).`); const { data, error } = await sb.auth.signInWithPassword({ email, password: pass }); if (error) { secFail(email, 'sign-in'); return authScreen('login', error.message); } secOK(); afterLogin(data.user); }
     if (t.id === 'a_signup') {
       if ((pass || '').length < 8) return toast('Password must be 8+ characters', true);
+      const sch = ($('#a_school') || {}).value; if (!sch) return toast('Choose your school', true);
       const { data, error } = await sb.auth.signUp({ email, password: pass, options: { data: { full_name: $('#a_name').value, phone: $('#a_phone').value } } });
       if (error) return authScreen('signup', error.message);
+      if (data.user) { try { await sb.rpc('request_join', { p_user: data.user.id, p_school: sch }); } catch { } }
       if (data.session) afterLogin(data.user); else authScreen('login', 'Account created. Check your email to confirm, then sign in.');
     }
     if (t.id === 'a_reset') { const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.href.split('#')[0] }); authScreen('login', error ? error.message : 'Reset link sent. Check your email.'); }
@@ -818,19 +817,17 @@ const PAGES = [
   { k: 'staff', t: 'Staff & Subjects', i: 'users', r: ['*'] },
   { k: 'scale', t: 'Grading Scale', i: 'scale', r: ['*'] },
   { g: 'Parents & learners' },
-  { k: 'parents', t: 'Parent Contacts', i: 'phone', r: ['*'] },
+  { k: 'parents', t: 'Parent Contacts', i: 'phone', r: ['super_admin', 'school_admin'] },
   { k: 'transfers', t: 'Learner Transfers', i: 'swap', r: ['super_admin', 'school_admin'] },
   { g: 'Ministry' },
-  { k: 'tracker', t: 'School Tracker', i: 'map', r: ['super_admin', 'district_admin'] },
+  { k: 'overview', t: 'Schools Overview', i: 'map', r: ['super_admin', 'ministry_admin', 'district_admin'] },
   { k: 'subscription', t: 'Subscription', i: 'card', r: ['super_admin', 'school_admin'] },
   { k: 'media', t: 'Pictures & Logo', i: 'image', r: ['super_admin'] },
-  { k: 'returns', t: 'School Returns', i: 'send', r: ['super_admin', 'school_admin'] },
-  { k: 'district', t: 'District Tracker', i: 'map', r: ['super_admin', 'school_admin', 'district_admin'] },
   { k: 'admin', t: 'Admin Desk', i: 'gear', r: ['super_admin', 'school_admin'] }
 ];
 function renderShell() {
   const opts = isSuper() ? `<select id="schoolSel" title="Working school">${S.schools.map(s => `<option value="${s.id}" ${S.school && s.id === S.school.id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>` : '';
-  const nav = PAGES.filter(p => p.g ? !isDO() : pageOK(p)).map(p => p.g ? `<div class="grp">${p.g}</div>` : `<a href="#/${p.k}" data-k="${p.k}"><svg viewBox="0 0 24 24">${ICON[p.i]}</svg>${p.t}</a>`).join('');
+  const nav = PAGES.filter(p => p.g ? !isOver() : pageOK(p)).map(p => p.g ? `<div class="grp">${p.g}</div>` : `<a href="#/${p.k}" data-k="${p.k}"><svg viewBox="0 0 24 24">${ICON[p.i]}</svg>${p.t}</a>`).join('');
   $('#root').innerHTML = `${!LIVE ? '<div class="demo-banner">DEMO MODE &ndash; data is saved in this browser only. Add your Supabase keys in index.html to go live.</div>' : ''}
   <div id="app"><div id="top"><button id="menuBtn" aria-label="Menu">&#9776;</button><div class="brand"><i class="coa"><img src="${COA}" alt="Zambia coat of arms"></i><span>Termly Report Form System</span></div><div class="sp"></div>${opts}
   <div class="who"><b>${esc(S.profile.full_name || S.profile.email)}</b>${esc(role().replace('_', ' '))}${S.school && !isSuper() ? ' &middot; ' + esc(S.school.name) : ''}</div>${isSuper() ? '<button class="btn ghost sm" id="ewBtn" style="background:#fff">&#9998; Edit words</button>' : ''}<button class="btn ghost sm" id="modeBtn" style="background:#fff">Phone mode</button><button class="btn gold sm" id="signOut">Sign out</button><img class="top-logo" alt="LME logo"></div>
@@ -843,12 +840,13 @@ async function route() {
   if (/^parent($|\?)/.test(h)) return renderParentPortal();
   if (!S.profile) return renderPublic(h === 'home' ? '' : h.split('?')[0]);
   const key = h.split('?')[0]; const pg = PAGES.find(p => p.k === key) || PAGES.find(p => p.k === 'panel');
-  if (isDO() && pg.k === 'home') { location.hash = '#/tracker'; return; }
+  if (isOver() && pg.k === 'home') { location.hash = '#/overview'; return; }
   if (!pageOK(pg)) { location.hash = '#/home'; return; }
   if (!$('#page')) renderShell();
   $$('#side a,#bnav a').forEach(a => a.classList.toggle('on', a.dataset.k === pg.k)); $('#side').classList.remove('open');
   const el = $('#page');
-  if (!S.school && !['admin', 'tracker'].includes(pg.k)) { el.innerHTML = `<div class="card"><h2>No school selected</h2><p>${isSuper() ? 'Create the first school in the <a href="#/admin">Admin Desk</a>.' : 'Your account is not linked to a school yet. Ask your administrator.'}</p></div>`; return; }
+  if (pg.k === 'overview') { el.innerHTML = '<p class="muted">Loading…</p>'; await guard(async () => { el.innerHTML = await PAGE_FN.overview(); PAGE_AFTER.overview(el); $('#main').scrollTop = 0; }); applyMedia(); return; }
+  if (!S.school && !['admin'].includes(pg.k)) { el.innerHTML = `<div class="card"><h2>No school selected</h2><p>${isSuper() ? 'Create the first school in the <a href="#/admin">Admin Desk</a>.' : 'Your account is not linked to a school yet. Ask your administrator.'}</p></div>`; return; }
   if (!(await schoolSubOK()) && pg.k !== 'subscription') { if (role() === 'school_admin') { location.hash = '#/subscription'; return; } el.innerHTML = '<div class="card"><h2>Subscription inactive</h2><p>Your school\'s subscription is not active. Please ask your school administrator to renew it.</p></div>'; return; }
   el.innerHTML = '<p class="muted">Loading…</p>';
   await guard(async () => { el.innerHTML = await PAGE_FN[pg.k](); if (PAGE_AFTER[pg.k]) PAGE_AFTER[pg.k](el); $('#main').scrollTop = 0; }); applyMedia();
@@ -890,7 +888,7 @@ PAGE_FN.panel = async () => {
   const c = curClass(); await loadAllResults(); const subBanner = await subBannerHTML();
   let ass = 0, pass = 0; S.classes.forEach(cl => computedClass(cl.id, S.allResults).forEach(r => { if (r.sat > 0) { ass++; if (r.achieved) pass++; } }));
   const active = S.learners.filter(l => l.status !== 'TRANSFERRED').length;
-  const tiles = PAGES.filter(p => p.k && !['home', 'panel'].includes(p.k) && pageOK(p)).map(p => `<a class="tile" href="#/${p.k}"><svg viewBox="0 0 24 24">${ICON[p.i]}</svg><b>${p.t}</b><span>${{ results: 'Enter learner marks', subscription: 'Plans, mobile money and card payments', media: 'Logo and banner pictures', tracker: 'Track schools: submissions and pass rates', mymarks: 'Enter marks for my subjects', monitor: 'Teacher progress and submissions', print: 'Print report forms', analysis: 'Grades, pass rates, boys/girls', ranking: 'Positions highest to lowest', schedule: 'Full mark schedule', stats: 'Whole-school performance', classes: 'All classes in the school', staff: 'Teachers & subjects', scale: 'CBC grades 1-5', parents: 'Contacts & access codes', transfers: 'Transfer out & certificate', returns: 'Submit to the Ministry', district: 'Results by district', admin: 'Schools, teachers, administrators' }[p.k] || ''}</span></a>`).join('');
+  const tiles = PAGES.filter(p => p.k && !['home', 'panel'].includes(p.k) && pageOK(p)).map(p => `<a class="tile" href="#/${p.k}"><svg viewBox="0 0 24 24">${ICON[p.i]}</svg><b>${p.t}</b><span>${{ results: 'Enter learner marks', subscription: 'Plans, mobile money and card payments', media: 'Logo and banner pictures', tracker: 'Track schools: submissions and pass rates', mymarks: 'Enter marks for my subjects', monitor: 'Teacher progress and submissions', print: 'Print report forms', analysis: 'Grades, pass rates, boys/girls', ranking: 'Positions highest to lowest', schedule: 'Full mark schedule', stats: 'Whole-school performance', classes: 'All classes in the school', staff: 'Teachers & subjects', scale: 'CBC grades 1-5', parents: 'Contacts & access codes', transfers: 'Transfer out & certificate', district: 'Results by district', admin: 'Schools, teachers, administrators' }[p.k] || ''}</span></a>`).join('');
   return pageHead('Control Panel', 'Classes, learners, staff and every tool of the system in one place.') + subBanner + `<div class="hero"><small>REPUBLIC OF ZAMBIA</small><h1>MINISTRY OF EDUCATION</h1><div style="margin-top:6px;letter-spacing:.14em">TERMLY REPORT FORM SYSTEM</div></div>
   <div class="kpis"><div class="kpi"><b>${S.classes.length}</b><span>Classes</span></div><div class="kpi"><b>${active}</b><span>Learners</span></div><div class="kpi"><b>${S.staff.filter(p => p.active).length}</b><span>Staff accounts</span></div>
   <div class="kpi"><b>${ass ? (pass / ass * 100).toFixed(1) + '%' : '–'}</b><span>School pass rate · Term ${S.ctx.term}, ${S.ctx.year}</span></div></div><div class="tile-grid">${tiles}</div>`;
@@ -1156,20 +1154,23 @@ PAGE_AFTER.scale = el => {
 };
 
 /* ============ PARENT CONTACTS ============ */
-const DEFAULT_MSG = 'Kindly receive results for {name} ({school}, Term {term} {year}). Open {link}, enter access code {code} and download the result slip (PDF). Pleasant day.';
+const DEFAULT_MSG = 'Results for {name} ({school}, Term {term} {year}): {result}, position {position} of {size}. Marks: {marks}. Full slip: {link} with code {code}.';
 const portalLink = () => location.href.split('#')[0] + '#/parent';
-const normPhone = (p, cc) => { let d = String(p || '').replace(/\D/g, ''); if (!d) return ''; if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = cc + d.slice(1); else if (!d.startsWith(cc) && d.length <= 9) d = cc + d; return d; };
+const ZM_NETS = { Airtel: ['57', '77', '97'], MTN: ['56', '76', '96'], Zamtel: ['55', '75', '95'], 'Zed Mobile': ['58', '78', '98'] };
+const zmNet = d => { const x = String(d).replace(/^260/, '').slice(0, 2); for (const n in ZM_NETS) if (ZM_NETS[n].includes(x)) return n; return ''; };
+const normPhone = (p, cc) => { let d = String(p || '').replace(/\D/g, ''); if (!d) return ''; if (d.startsWith('00')) d = d.slice(2); else if (d.startsWith('0')) d = cc + d.slice(1); else if (!d.startsWith(cc) && d.length <= 9) d = cc + d; if (cc === '260' && !(d.length === 12 && d.startsWith('260') && zmNet(d))) return ''; return d; };
 PAGE_FN.parents = async () => {
-  const c = curClass(); const head = pageHead('Parent Contacts', 'WhatsApp, SMS, email and private access codes for parents / guardians.', '<button class="btn ghost" id="csvPar">Download codes (CSV)</button>') + ctxBar(); if (!c) return head + needClass();
+  const c = curClass(); const head = pageHead('Parent Contacts', 'WhatsApp, SMS, email and private access codes for parents / guardians.', '<button class="btn gold" id="waAll">WhatsApp all parents</button><button class="btn ghost" id="csvPar">Download codes (CSV)</button>') + ctxBar(); if (!c) return head + needClass();
   const cc = lsGet('lme_cc', '260'), msg = lsGet('lme_msg', DEFAULT_MSG);
-  return head + `<div class="card noprint"><div class="grid2"><div class="field"><label>WhatsApp country code</label><input id="ccIn" value="${esc(cc)}"></div><div class="field"><label>Parent portal link (give this to parents)</label><input readonly value="${esc(portalLink())}" onclick="this.select()"></div></div>
-  <div class="field"><label>Message template — use {name} {code} {link} {school} {term} {year}</label><textarea id="msgIn">${esc(msg)}</textarea></div><p class="muted" style="margin:0">Parents see only their own child's result slip after typing the private access code, and can download it as a PDF or CSV. Ask learners' guardians for phone numbers via <b>Results Entry → Edit</b>.</p></div>
+  return head + `<div class="card noprint"><div class="grid2"><div class="field"><label>Country code (Zambia: 260, for +260)</label><input id="ccIn" value="${esc(cc)}"></div><div class="field"><label>Parent portal link (give this to parents)</label><input readonly value="${esc(portalLink())}" onclick="this.select()"></div></div>
+  <div class="field"><label>Message template — use {name} {code} {link} {school} {term} {year} {result} {position} {size} {marks}</label><textarea id="msgIn">${esc(msg)}</textarea></div><p class="muted" style="margin:0">Parents see only their own child's result slip after typing the private access code, and can download it as a PDF or CSV. Ask learners' guardians for phone numbers via <b>Results Entry → Edit</b>.</p></div>
   <div class="card"><div class="tw"><table class="zebra"><thead><tr><th class="n">SN</th><th>LEARNER</th><th>GUARDIAN</th><th>PHONE</th><th>EMAIL</th><th>ACCESS CODE</th><th class="noprint">SEND</th></tr></thead><tbody>
   ${learnersOf(c.id).map(l => `<tr><td class="n">${l.sn ?? ''}</td><td>${esc(fullName(l))}</td><td>${esc(l.guardian_name)}</td><td>${esc(l.guardian_phone)}</td><td>${esc(l.guardian_email)}</td><td><code>${esc(l.access_code)}</code></td><td class="noprint"><button class="btn ghost sm" data-w="${l.id}">WhatsApp</button> <button class="btn ghost sm" data-sms="${l.id}">SMS</button> <button class="btn ghost sm" data-mail="${l.id}">Email</button></td></tr>`).join('')}</tbody></table></div></div>`;
 };
 PAGE_AFTER.parents = el => {
   const c = curClass(); if (!c) return;
-  const text = l => ($('#msgIn').value || DEFAULT_MSG).replace(/\{name\}/g, fullName(l)).replace(/\{code\}/g, l.access_code).replace(/\{link\}/g, portalLink()).replace(/\{school\}/g, S.school.name).replace(/\{term\}/g, S.ctx.term).replace(/\{year\}/g, S.ctx.year);
+  const rowsC = (() => { try { return computedClass(c.id); } catch { return []; } })(), subs = subjectsOf(c.id), info = l => rowsC.find(r => r.id === l.id) || {};
+  const text = l => ($('#msgIn').value || DEFAULT_MSG).replace(/\{name\}/g, fullName(l)).replace(/\{code\}/g, l.access_code).replace(/\{link\}/g, portalLink()).replace(/\{school\}/g, S.school.name).replace(/\{term\}/g, S.ctx.term).replace(/\{year\}/g, S.ctx.year).replace(/\{result\}/g, info(l).result || '').replace(/\{position\}/g, info(l).position ?? '').replace(/\{size\}/g, rowsC.length).replace(/\{marks\}/g, (info(l).marks || []).map((m, i) => (subs[i] ? subs[i].name : '') + ' ' + (m === null || m === undefined ? '-' : m)).join(', '));
   $('#msgIn', el).oninput = e => lsSet('lme_msg', e.target.value); $('#ccIn', el).oninput = e => lsSet('lme_cc', e.target.value);
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-w],[data-sms],[data-mail]'); if (!b) return; const l = S.learners.find(x => x.id === (b.dataset.w || b.dataset.sms || b.dataset.mail)); const ph = normPhone(l.guardian_phone, $('#ccIn').value || '260');
@@ -1177,6 +1178,29 @@ PAGE_AFTER.parents = el => {
     if (!ph) return toast('No phone number for this guardian', true);
     if (b.dataset.w) window.open(`https://wa.me/${ph}?text=${encodeURIComponent(text(l))}`, '_blank'); else location.href = `sms:+${ph}?body=${encodeURIComponent(text(l))}`;
   });
+  $('#waAll').onclick = () => {
+    if (!isAdmin()) return toast('Only school administrators can send results to parents', true);
+    const list = learnersOf(c.id).map(l => ({ l, ph: normPhone(l.guardian_phone, $('#ccIn').value || '260') })), ok = list.filter(x => x.ph), skip = list.length - ok.length, url = x => `https://wa.me/${x.ph}?text=${encodeURIComponent(text(x.l))}`; let i = 0;
+    if (!ok.length) return toast('No guardian phone numbers in this class', true);
+    const nm = x => esc(((x.l.surname || '') + ' ' + (x.l.forenames || '')).trim());
+    modal({ title: 'WhatsApp results to parents', ok: 'Close', body: `<p>${ok.length} parent(s) ready${skip ? `, ${skip} skipped (no valid phone number)` : ''}. WhatsApp opens each chat with the results already typed; press <b>Send</b> there.</p>
+      <div class="row" style="margin-bottom:8px"><button class="btn gold" id="waModeAll">All parents at once</button><button class="btn ghost" id="waModeSel">Choose learners</button></div>
+      <div id="waSel" style="display:none;max-height:220px;overflow:auto;margin-bottom:8px"><div style="margin-bottom:4px"><a href="#" id="waAllOn">Select all</a> &middot; <a href="#" id="waAllOff">Select none</a></div>${ok.map((x, k) => `<label style="display:block"><input type="checkbox" data-wk="${k}" checked> ${nm(x)} <span class="muted">+${x.ph}${zmNet(x.ph) ? ' &middot; ' + zmNet(x.ph) : ''}</span></label>`).join('')}</div>
+      <div class="row"><button class="btn gold" id="waNext">Open next chat</button><button class="btn ghost" id="waOpen">Open all chats</button><span id="waProg" class="muted"></span></div>
+      <p class="muted">For <b>Open all chats</b>, allow pop-ups for this site when the browser asks, then tap it again.</p>` });
+    setTimeout(() => {
+      const sel = () => $('#waSel').style.display !== 'none', cur = () => sel() ? ok.filter((x, k) => { const b = $('[data-wk="' + k + '"]'); return b && b.checked; }) : ok;
+      const prog = () => { $('#waProg').textContent = `${i} / ${cur().length}`; }, done = n => DB.audit('whatsapp.send', `${n} parents, ${classLabel(c)}`);
+      const mode = on => { $('#waSel').style.display = on ? 'block' : 'none'; $('#waModeAll').className = 'btn ' + (on ? 'ghost' : 'gold'); $('#waModeSel').className = 'btn ' + (on ? 'gold' : 'ghost'); i = 0; prog(); };
+      $('#waModeAll').onclick = () => mode(false); $('#waModeSel').onclick = () => mode(true);
+      $('#waAllOn').onclick = e => { e.preventDefault(); $$('[data-wk]').forEach(b => b.checked = true); i = 0; prog(); };
+      $('#waAllOff').onclick = e => { e.preventDefault(); $$('[data-wk]').forEach(b => b.checked = false); i = 0; prog(); };
+      $('#waSel').onchange = () => { i = 0; prog(); };
+      $('#waNext').onclick = () => { const L = cur(); if (!L.length) return toast('Select at least one learner', true); if (i >= L.length) return; window.open(url(L[i]), '_blank'); i++; prog(); if (i >= L.length) done(L.length); };
+      $('#waOpen').onclick = () => { const L = cur(); if (!L.length) return toast('Select at least one learner', true); L.forEach(x => window.open(url(x), '_blank')); i = L.length; prog(); done(L.length); };
+      prog();
+    }, 50);
+  };
   $('#csvPar').onclick = () => { const lines = [['SN', 'Learner', 'Class', 'Guardian', 'Phone', 'Email', 'Access code'].join(',')]; learnersOf(c.id).forEach(l => lines.push([l.sn, fullName(l), classLabel(c), l.guardian_name, l.guardian_phone, l.guardian_email, l.access_code].map(csvCell).join(','))); download('parent-access-codes.csv', lines.join('\n')); };
 };
 
@@ -1217,40 +1241,32 @@ PAGE_AFTER.transfers = el => {
   });
 };
 
-/* ============ SCHOOL RETURNS & DISTRICT TRACKER ============ */
-function liveReturn(c) { const rows = computedClass(c.id); const nums = rows.flatMap(r => r.marks.filter(m => typeof m === 'number')); const ass = rows.filter(r => r.sat > 0);
-  return { school_id: S.school.id, class_id: c.id, year: +S.ctx.year, term: +S.ctx.term, form: +c.form, class_name: c.name, boys: rows.filter(r => r.sex === 'M').length, girls: rows.filter(r => r.sex === 'F').length, assessed: ass.length, passed: ass.filter(r => r.achieved).length, mean_mark: nums.length ? Math.round(nums.reduce((a, b) => a + b, 0) / nums.length * 10) / 10 : 0 }; }
-PAGE_FN.returns = async () => {
-  await loadAllResults(); S.returns = await DB.select('school_returns', isSuper() ? {} : { school_id: S.school.id });
-  const live = S.classes.map(c => ({ c, r: liveReturn(c) })), sName = id => (S.schools.find(s => s.id === id) || {}).name || '';
-  const thisTerm = x => +x.year === +S.ctx.year && +x.term === +S.ctx.term;
-  return pageHead('School Returns', 'Submit this school’s class results to the national register.', '<button class="btn gold" id="subAll">Submit all classes</button>') + ctxBar({ noClass: true }) + `<div class="card"><h2>A. This school's current return (live)</h2><div class="tw"><table><thead><tr><th>CLASS</th><th class="n">BOYS</th><th class="n">GIRLS</th><th class="n">ENROLLED</th><th class="n">ASSESSED</th><th class="n">PASSED</th><th class="n">PASS %</th><th class="n">MEAN MARK</th><th>SUBMITTED?</th></tr></thead><tbody>
-  ${live.map(({ c, r }) => { const sub = S.returns.find(x => x.school_id === S.school.id && x.class_id === c.id && thisTerm(x)); return `<tr><td>${esc(classLabel(c))}</td><td class="n">${r.boys}</td><td class="n">${r.girls}</td><td class="n">${r.boys + r.girls}</td><td class="n">${r.assessed}</td><td class="n">${r.passed}</td><td class="n">${r.assessed ? pct(r.passed / r.assessed * 100) : ''}</td><td class="n">${r.mean_mark}</td><td>${sub ? '<span class="pill ok">Submitted</span>' : '<span class="pill warn">Not yet</span>'} <button class="btn ghost sm" data-sub="${c.id}">${sub ? 'Re-submit' : 'Submit'}</button></td></tr>`; }).join('')}</tbody></table></div></div>
-  <div class="card"><h2>B. National register${isSuper() ? ' (all schools)' : ' (this school)'}</h2><div class="tw"><table class="zebra"><thead><tr><th>SCHOOL</th><th class="n">YEAR</th><th class="n">TERM</th><th class="n">FORM</th><th>CLASS</th><th class="n">ENROLLED</th><th class="n">ASSESSED</th><th class="n">PASSED</th><th class="n">PASS %</th><th class="n">MEAN</th></tr></thead><tbody>
-  ${[...S.returns].sort((a, b) => b.year - a.year || b.term - a.term).map(x => `<tr><td>${esc(sName(x.school_id))}</td><td class="n">${x.year}</td><td class="n">${x.term}</td><td class="n">${x.form}</td><td>${esc(x.class_name)}</td><td class="n">${x.boys + x.girls}</td><td class="n">${x.assessed}</td><td class="n">${x.passed}</td><td class="n">${x.assessed ? pct(x.passed / x.assessed * 100) : ''}</td><td class="n">${x.mean_mark ?? ''}</td></tr>`).join('') || '<tr><td colspan="10" class="muted center">Nothing submitted yet.</td></tr>'}</tbody></table></div></div>`;
-};
-PAGE_AFTER.returns = el => {
-  const submit = async cs => { for (const c of cs) { const r = liveReturn(c); await DB.upsert('school_returns', { ...r, submitted_by: S.profile.id, submitted_at: new Date().toISOString() }, 'school_id,class_id,year,term'); } await DB.audit('return', `${cs.length} class return(s) Term ${S.ctx.term} ${S.ctx.year}`); toast('Return submitted'); route(); };
-  $('#subAll').onclick = () => guard(() => submit(S.classes));
-  el.addEventListener('click', e => { const b = e.target.closest('[data-sub]'); if (b) guard(() => submit([S.classes.find(c => c.id === b.dataset.sub)])); });
-};
 let DT = { year: 'ALL', term: 'ALL', form: 'ALL', district: null };
-PAGE_FN.district = async () => {
-  const rets = await DB.select('school_returns', scopeFilter()); const sch = id => S.schools.find(s => s.id === id) || {};
-  const years = [...new Set(rets.map(r => r.year))].sort(), districts = [...new Set(trackSchools().map(s => s.district).filter(Boolean))].sort(); if (!DT.district) DT.district = districts[0] || '';
-  const f = rets.filter(r => (DT.year === 'ALL' || +r.year === +DT.year) && (DT.term === 'ALL' || +r.term === +DT.term) && (DT.form === 'ALL' || +r.form === +DT.form));
-  const agg = list => { const a = list.reduce((t, r) => ({ boys: t.boys + r.boys, girls: t.girls + r.girls, ass: t.ass + r.assessed, pass: t.pass + r.passed, ms: t.ms + (+r.mean_mark || 0) * r.assessed }), { boys: 0, girls: 0, ass: 0, pass: 0, ms: 0 }); a.rate = a.ass ? a.pass / a.ass * 100 : null; a.mean = a.ass ? a.ms / a.ass : null; a.schools = new Set(list.map(r => r.school_id)).size; return a; };
-  const byD = districts.map(d => ({ d, a: agg(f.filter(r => sch(r.school_id).district === d)) })), sel = f.filter(r => sch(r.school_id).district === DT.district);
-  const bySchool = [...new Set(sel.map(r => r.school_id))].map(id => ({ s: sch(id), a: agg(sel.filter(r => r.school_id === id)) }));
-  const row = (n, a) => `<td class="n">${a.schools ?? ''}</td><td class="n">${a.boys}</td><td class="n">${a.girls}</td><td class="n">${a.boys + a.girls}</td><td class="n">${a.ass}</td><td class="n">${a.pass}</td><td class="n"><b>${pct(a.rate)}</b></td><td class="n">${a.mean == null ? '' : a.mean.toFixed(1)}</td>`;
-  return pageHead('District Results Tracker', 'Results and enrolment by district, from submitted school returns.', printBtn()) + `<div class="card noprint"><div class="row"><label class="field" style="margin:0"><label>Year</label><select id="dtY">${optList([['ALL', 'ALL'], ...years.map(y => [y, y])], DT.year)}</select></label>
-  <label class="field" style="margin:0"><label>Term</label><select id="dtT">${optList([['ALL', 'ALL'], 1, 2, 3].map(x => Array.isArray(x) ? x : [x, x]), DT.term)}</select></label><label class="field" style="margin:0"><label>Form level</label><select id="dtF">${optList([['ALL', 'ALL'], ...[1, 2, 3, 4, 5].map(x => [x, 'Form ' + x])], DT.form)}</select></label>
-  <label class="field" style="margin:0"><label>District (school drill-down)</label><select id="dtD">${optList(districts.map(d => [d, d]), DT.district)}</select></label></div></div>
-  <div class="printable"><div class="card"><h2>All districts</h2><div class="tw"><table class="zebra"><thead><tr><th>DISTRICT</th><th class="n">SCHOOLS</th><th class="n">BOYS</th><th class="n">GIRLS</th><th class="n">ENROLLED</th><th class="n">ASSESSED</th><th class="n">PASSED</th><th class="n">PASS %</th><th class="n">MEAN</th></tr></thead><tbody>${byD.map(x => `<tr><td><b>${esc(x.d)}</b></td>${row(x.d, x.a)}</tr>`).join('') || '<tr><td colspan="9" class="muted center">No data</td></tr>'}</tbody></table></div>
-  <div class="mt">${byD.filter(x => x.a.rate != null).map(x => bar(x.d, x.a.rate, x.a.rate >= 50 ? 'g' : 'r')).join('')}</div></div>
-  <div class="card"><h2>Schools in ${esc(DT.district || '—')}</h2><div class="tw"><table class="zebra"><thead><tr><th>SCHOOL</th><th>CODE</th><th class="n">SCHOOLS</th><th class="n">BOYS</th><th class="n">GIRLS</th><th class="n">ENROLLED</th><th class="n">ASSESSED</th><th class="n">PASSED</th><th class="n">PASS %</th><th class="n">MEAN</th></tr></thead><tbody>${bySchool.map(x => `<tr><td><b>${esc(x.s.name)}</b></td><td>${esc(x.s.code)}</td>${row('', x.a)}</tr>`).join('') || '<tr><td colspan="10" class="muted center">No returns for this district</td></tr>'}</tbody></table></div></div></div>`;
+PAGE_FN.overview = async () => {
+  if (!LIVE) return pageHead('Schools Overview', '') + '<div class="card"><p>Totals appear once the system is connected to Supabase.</p></div>';
+  const { data, error } = await sb.rpc('school_totals'); if (error) throw new Error(error.message + ' (run supabase-roles-part5.sql once in Supabase)');
+  OV = data || []; const money = !isDO();
+  return pageHead('Schools Overview', isDO() ? 'Learners enrolled in each school of your district' : 'Consolidated enrolment totals per school, to guide grant allocation', '<button class="btn ghost" id="ovCsv">Download CSV</button>') + `<div class="card">${money ? '<div class="row" style="margin-bottom:8px"><label>Grant per learner (ZMW)</label><input id="ovRate" type="number" min="0" step="0.01" style="max-width:150px" value="' + esc(lsGet('lme_rate', '') || '') + '"></div>' : ''}<input id="ovQ" placeholder="Search school or district…" style="margin-bottom:8px"><div style="overflow-x:auto" id="ovTbl"></div></div>`;
 };
-PAGE_AFTER.district = el => { const m = { dtY: 'year', dtT: 'term', dtF: 'form', dtD: 'district' }; el.addEventListener('change', e => { if (m[e.target.id]) { DT[m[e.target.id]] = e.target.value; route(); } }); };
+let OV = [];
+PAGE_AFTER.overview = () => {
+  const money = !isDO(), full = !isDO();
+  const rate = () => parseFloat($('#ovRate') ? $('#ovRate').value : '') || 0, fm = n => Number(n).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const rows = () => { const q = ($('#ovQ').value || '').toLowerCase(); return OV.filter(r => !q || ((r.sname || '') + ' ' + (r.sdistrict || '')).toLowerCase().includes(q)); };
+  const draw = () => {
+    const rs = rows(), sum = k => rs.reduce((a, r) => a + Number(r[k] || 0), 0), R = rate();
+    $('#ovTbl').innerHTML = '<table style="width:100%"><thead><tr><th>School</th>' + (full ? '<th>District</th>' : '') + '<th>Boys</th><th>Girls</th><th>Total</th>' + (full ? '<th>Classes</th><th>Teachers</th>' : '') + (money ? '<th>Grant (ZMW)</th>' : '') + '</tr></thead><tbody>' +
+      rs.map(r => '<tr><td>' + esc(r.sname) + '</td>' + (full ? '<td>' + esc(r.sdistrict || '') + '</td>' : '') + '<td>' + r.boys + '</td><td>' + r.girls + '</td><td><b>' + r.total + '</b></td>' + (full ? '<td>' + r.n_classes + '</td><td>' + r.n_teachers + '</td>' : '') + (money ? '<td>' + fm(r.total * R) + '</td>' : '') + '</tr>').join('') +
+      '</tbody><tfoot><tr><th>All schools (' + rs.length + ')</th>' + (full ? '<th></th>' : '') + '<th>' + sum('boys') + '</th><th>' + sum('girls') + '</th><th>' + sum('total') + '</th>' + (full ? '<th>' + sum('n_classes') + '</th><th>' + sum('n_teachers') + '</th>' : '') + (money ? '<th>' + fm(sum('total') * R) + '</th>' : '') + '</tr></tfoot></table>';
+  };
+  $('#ovQ').oninput = draw; if ($('#ovRate')) $('#ovRate').oninput = () => { lsSet('lme_rate', $('#ovRate').value); draw(); };
+  $('#ovCsv').onclick = () => {
+    const R = rate(), head = ['School', ...(full ? ['District'] : []), 'Boys', 'Girls', 'Total', ...(full ? ['Classes', 'Teachers'] : []), ...(money ? ['Grant (ZMW)'] : [])];
+    const lines = [head, ...rows().map(r => [r.sname, ...(full ? [r.sdistrict || ''] : []), r.boys, r.girls, r.total, ...(full ? [r.n_classes, r.n_teachers] : []), ...(money ? [(r.total * R).toFixed(2)] : [])])].map(a => a.map(csvCell).join(',')).join('\n');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([lines], { type: 'text/csv' })); a.download = 'schools-overview.csv'; a.click();
+  };
+  draw();
+};
 
 /* ============ TEACHER ENTRY: LOCKS, MY MARKS, TEACHER MONITOR ============ */
 /* Submissions/unlocks and entry activity are stored in the existing audit_log table (no new tables needed). */
@@ -1400,7 +1416,7 @@ function openStaffUpload() {
       if (!L.length) { toast('No valid people to import (each needs a name and an email).', true); return false; }
       const role2 = $('#usRole').value, school_id = isSuper() ? $('#usSch').value : S.school.id, ok = [], bad = [];
       for (const x of L) { const password = tempPass();
-        try { if (LIVE) { const { data, error } = await sb.functions.invoke('admin-create-user', { body: { full_name: x.name, email: x.email, phone: x.phone, role: role2, school_id, password } }); if (error || (data && data.error)) throw new Error((data && data.error) || 'could not create'); }
+        try { if (LIVE) await createLiveUser({ full_name: x.name, email: x.email, phone: x.phone, role: role2, school_id, password });
           else await DB.insert('profiles', { email: x.email, full_name: x.name, phone: x.phone, role: role2, school_id, active: true });
           ok.push({ ...x, password }); } catch (err) { bad.push(`${x.email}: ${err.message || err}`); } }
       if (ok.length) { await DB.audit('user.upload', `${ok.length} ${role2} account(s)`); download('new-staff-logins.csv', [['Name', 'Email', 'Phone', 'Temporary password'], ...ok.map(x => [x.name, x.email, x.phone, x.password])].map(r => r.map(csvCell).join(',')).join('\n')); }
@@ -1417,30 +1433,6 @@ const myDistrict = () => { const x = S.schools.find(k => k.id === (S.profile && 
 const trackSchools = () => isSuper() ? S.schools : S.schools.filter(x => x.district && x.district === myDistrict());
 const scopeFilter = () => isSuper() ? {} : isDO() ? { school_id: { in: trackSchools().map(x => x.id) } } : { school_id: S.school.id };
 const TR = { q: '', province: '', district: '', status: '' }, TR_CLS = { SUBMITTED: 'ok', PARTIAL: 'warn', 'NOT SUBMITTED': 'bad', 'NO CLASSES': 'mute' };
-PAGE_FN.tracker = async () => {
-  const sch = trackSchools(), ids = sch.map(x => x.id), T = +S.ctx.term, Y = +S.ctx.year;
-  const head = pageHead('School Tracker', isSuper() ? 'Every school in the country' : `Schools in ${esc(myDistrict() || '—')} district`, '<button class="btn ghost" id="csvTr">Download CSV</button>') + ctxBar({ noClass: true });
-  if (!ids.length) return head + '<div class="card"><p>No schools found. A district officer account must be linked to a school in the district to be tracked; ask the Ministry administrator.</p></div>';
-  const f = isSuper() ? {} : { school_id: { in: ids } };
-  const [classes, rets, profs] = await Promise.all([DB.select('classes', f), DB.select('school_returns', f), DB.select('profiles', f)]);
-  const rows = sch.map(x => { const cl = classes.filter(c => c.school_id === x.id), rs = rets.filter(r => r.school_id === x.id && +r.term === T && +r.year === Y), subm = new Set(rs.map(r => r.class_id || r.class_name)).size;
-    const ass = rs.reduce((n, r) => n + r.assessed, 0), pas = rs.reduce((n, r) => n + r.passed, 0), at = rs.reduce((m, r) => String(r.submitted_at || '') > m ? String(r.submitted_at) : m, '');
-    return { s: x, nCls: cl.length, subm, enr: rs.reduce((n, r) => n + r.boys + r.girls, 0), ass, pas, rate: ass ? pas / ass * 100 : null, mean: ass ? rs.reduce((n, r) => n + (+r.mean_mark || 0) * r.assessed, 0) / ass : null, at,
-      teachers: profs.filter(p => p.school_id === x.id && p.role === 'teacher' && p.active).length, status: !rs.length ? (cl.length ? 'NOT SUBMITTED' : 'NO CLASSES') : subm < cl.length ? 'PARTIAL' : 'SUBMITTED' }; });
-  const q = TR.q.toLowerCase(), list = rows.filter(x => (!q || (x.s.name + ' ' + (x.s.code || '')).toLowerCase().includes(q)) && (!TR.province || x.s.province === TR.province) && (!TR.district || x.s.district === TR.district) && (!TR.status || x.status === TR.status)); S._trList = list;
-  const A = list.reduce((a, x) => ({ ass: a.ass + x.ass, pas: a.pas + x.pas, enr: a.enr + x.enr }), { ass: 0, pas: 0, enr: 0 }), districts = [...new Set(sch.map(x => x.district).filter(Boolean))].sort();
-  return head + `<div class="kpis"><div class="kpi"><b>${list.length}</b><span>Schools</span></div><div class="kpi"><b>${list.filter(x => x.status === 'SUBMITTED').length}</b><span>Fully submitted</span></div><div class="kpi"><b>${list.filter(x => x.status === 'NOT SUBMITTED').length}</b><span>Not submitted</span></div><div class="kpi"><b>${A.ass ? pct(A.pas / A.ass * 100) : '–'}</b><span>Pass rate</span></div><div class="kpi"><b>${A.enr}</b><span>Learners enrolled</span></div></div>
-  <div class="card"><div class="row" style="margin-bottom:8px"><input id="trq" placeholder="Search school or code" value="${esc(TR.q)}">${isSuper() ? `<select id="trp">${optList(PROVINCES.map(x => [x, x]), TR.province, 'All provinces')}</select><select id="trd">${optList(districts.map(x => [x, x]), TR.district, 'All districts')}</select>` : ''}<select id="trs">${optList(Object.keys(TR_CLS).map(x => [x, x]), TR.status, 'All statuses')}</select></div>
-  <div class="tw"><table class="zebra"><thead><tr><th>SCHOOL</th><th>CODE</th><th>DISTRICT</th>${isSuper() ? '<th>PROVINCE</th>' : ''}<th class="n">TEACHERS</th><th class="n">CLASSES SUBMITTED</th><th class="n">ENROLLED</th><th class="n">ASSESSED</th><th class="n">PASS %</th><th class="n">MEAN</th><th>LAST SUBMITTED</th><th>STATUS</th>${isSuper() ? '<th></th>' : ''}</tr></thead><tbody>
-  ${list.map(x => `<tr><td><b>${esc(x.s.name)}</b></td><td>${esc(x.s.code)}</td><td>${esc(x.s.district)}</td>${isSuper() ? `<td>${esc(x.s.province)}</td>` : ''}<td class="n">${x.teachers}</td><td class="n">${x.subm} / ${x.nCls}</td><td class="n">${x.enr}</td><td class="n">${x.ass}</td><td class="n">${x.rate == null ? '–' : `<span class="pill ${band(x.rate)[1]}">${x.rate.toFixed(1)}%</span>`}</td><td class="n">${x.mean == null ? '' : x.mean.toFixed(1)}</td><td>${x.at ? esc(ago(x.at)) : '–'}</td><td><span class="pill ${TR_CLS[x.status]}">${x.status}</span></td>${isSuper() ? `<td><button class="btn ghost sm" data-topen="${x.s.id}">Open</button></td>` : ''}</tr>`).join('') || '<tr><td colspan="13" class="muted center">No schools match.</td></tr>'}</tbody></table></div>
-  <p class="muted" style="margin-bottom:0">Figures come from the class returns each school submits (School Returns page) for Term ${T}, ${Y}.</p></div>`;
-};
-PAGE_AFTER.tracker = el => {
-  const bind = (id, k) => { const x = $('#' + id, el); if (x) x.oninput = x.onchange = () => { TR[k] = x.value; if (id === 'trq') { clearTimeout(bind.t); bind.t = setTimeout(() => route().then(() => { const i = $('#trq'); i && (i.focus(), i.setSelectionRange(i.value.length, i.value.length)); }), 300); } else route(); }; };
-  bind('trq', 'q'); bind('trp', 'province'); bind('trd', 'district'); bind('trs', 'status');
-  const c = $('#csvTr', el); if (c) c.onclick = () => { const L = [['School', 'Code', 'District', 'Province', 'Teachers', 'Classes submitted', 'Classes', 'Enrolled', 'Assessed', 'Passed', 'Pass %', 'Mean', 'Status']]; (S._trList || []).forEach(x => L.push([x.s.name, x.s.code, x.s.district, x.s.province, x.teachers, x.subm, x.nCls, x.enr, x.ass, x.pas, x.rate == null ? '' : x.rate.toFixed(1), x.mean == null ? '' : x.mean.toFixed(1), x.status])); download(`school-tracker-T${S.ctx.term}-${S.ctx.year}.csv`, L.map(r => r.map(csvCell).join(',')).join('\n')); };
-  el.addEventListener('click', e => { const b = e.target.closest('[data-topen]'); if (b) guard(async () => { await setWorkingSchool(b.dataset.topen); renderShell(); location.hash = '#/stats'; toast('Working school changed'); }); });
-};
 
 /* ============ SCHOOL SUBSCRIPTIONS (mobile money: MTN, Airtel, Zamtel · Visa/Mastercard) ============
    Needs a "subscriptions" table in Supabase – SQL (run once in the SQL editor):
@@ -1639,6 +1631,21 @@ PAGE_AFTER.media = el => {
 };
 
 /* ============ ADMIN DESK ============ */
+const isAnc = id => { let cur = S.profile.id, n = 0; while (cur && n++ < 20) { const u = cur === S.profile.id ? S.profile : adminUsers.find(x => x.id === cur); if (!u) return false; cur = u.added_by; if (cur === id) return true; } return false; };
+async function manageUser(id, action, names, name, phone) {
+  if (LIVE) { const { error } = await sb.rpc('manage_user', { p_user: id, p_action: action, p_names: names ?? null, p_name: name || null, p_phone: phone || null }); if (error) throw new Error(error.message + ' (run supabase-roles-part2.sql once in Supabase)'); return; }
+  if (action === 'delete') return DB.remove('profiles', id);
+  const patch = action === 'deactivate' ? { active: false } : { active: true }; if (names !== undefined && names !== null) patch.can_edit_names = names; if (name) patch.full_name = name; if (phone) patch.phone = phone; await DB.update('profiles', id, patch);
+}
+async function createLiveUser(f) {
+  try { const { data, error } = await sb.functions.invoke('admin-create-user', { body: f }); if (!error && !(data && data.error)) return; } catch { }
+  const c = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } });
+  const { data, error } = await c.auth.signUp({ email: f.email, password: f.password, options: { data: { full_name: f.full_name, phone: f.phone || '' } } });
+  if (error) throw error;
+  if (!data.user || (data.user.identities && !data.user.identities.length)) throw new Error('This email is already registered');
+  const { error: e2 } = await sb.rpc('admin_provision_user', { p_user: data.user.id, p_role: f.role, p_school: f.school_id || null, p_name: f.full_name, p_phone: f.phone || null });
+  if (e2) throw new Error(e2.message + ' (run supabase-roles.sql once in Supabase)');
+}
 let adminTab = 'overview'; let adminUsers = [];
 const schoolForm = (s = {}) => `<div class="grid2"><div class="field"><label>School name *</label><input name="name" value="${esc(s.name)}"></div><div class="field"><label>EMIS school code</label><input name="code" value="${esc(s.code)}"></div>
  <div class="field"><label>Province</label><select name="province">${optList(PROVINCES.map(p => [p, p]), s.province, '— choose —')}</select></div><div class="field"><label>District</label><input name="district" value="${esc(s.district)}"></div>
@@ -1649,7 +1656,7 @@ const schoolForm = (s = {}) => `<div class="grid2"><div class="field"><label>Sch
 const schoolPayload = d => ({ name: d.name, code: d.code || null, province: d.province || null, district: d.district || null, head_teacher: d.head_teacher || null, phone: d.phone || null, email: d.email || null, address: d.address || null, pass_mark: +d.pass_mark || 40, min_pass_rate: (+d.min_pass_rate || 50) / 100, active: !!d.active });
 const userForm = (u = {}, isNew) => `<div class="grid2"><div class="field"><label>Full name *</label><input name="full_name" value="${esc(u.full_name)}"></div><div class="field"><label>Phone</label><input name="phone" value="${esc(u.phone)}"></div>
  <div class="field"><label>Email *</label><input name="email" type="email" value="${esc(u.email)}" ${isNew ? '' : 'disabled'}></div>${isNew ? '<div class="field"><label>Temporary password (8+ characters) *</label><input name="password" type="text"></div>' : ''}
- <div class="field"><label>Role</label><select name="role">${optList([['teacher', 'Teacher'], ['school_admin', 'School administrator / head teacher'], ...(isSuper() ? [['district_admin', 'District education officer (their school sets the district)'], ['super_admin', 'Ministry super administrator']] : [])], u.role || 'teacher')}</select></div>
+ <div class="field"><label>Role</label><select name="role">${optList([['teacher', 'Teacher'], ['school_admin', 'School administrator / head teacher'], ...(isSuper() ? [['district_admin', 'District education officer (sees learner totals of schools in their district only)'], ['ministry_admin', 'Ministry of Education (oversight: school totals and grants only)'], ['super_admin', 'Ministry super administrator']] : [])], u.role || 'teacher')}</select></div>
  <div class="field"><label>School</label><select name="school_id" ${isSuper() ? '' : 'disabled'}>${optList(S.schools.map(s => [s.id, s.name]), u.school_id || (S.school && S.school.id), '— none —')}</select></div>
  ${isNew ? '' : '<div class="field chk"><input type="checkbox" name="active" ' + (u.active ? 'checked' : '') + '><label>Account active</label></div>'}</div>`;
 async function loadUsers() { adminUsers = await DB.select('profiles', isSuper() ? {} : { school_id: S.school.id }); }
@@ -1662,7 +1669,7 @@ PAGE_FN.admin = async () => {
 };
 const ADMIN_TAB = {
   overview: async () => {
-    const [ls, cs] = [S.learners.length, S.classes.length], steps = [[S.schools.length > 0, 'Add a school', 'schools'], [adminUsers.some(u => u.role === 'school_admin'), 'Add a school administrator / head teacher', 'users'], [adminUsers.some(u => u.role === 'teacher'), 'Add teachers', 'users'], [cs > 0, 'Add classes (Classes page)', null], [ls > 0, 'Add learners (Results Entry)', null]];
+    const [ls, cs] = [S.learners.length, S.classes.length], steps = [...(isSuper() ? [[S.schools.length > 0, 'Add a school', 'schools']] : []), [adminUsers.some(u => u.role === 'school_admin'), 'Add a school administrator / head teacher', 'users'], [adminUsers.some(u => u.role === 'teacher'), 'Add teachers', 'users'], [cs > 0, 'Add classes (Classes page)', null], [ls > 0, 'Add learners (Results Entry)', null]];
     return `<div class="kpis"><div class="kpi"><b>${S.schools.length}</b><span>Schools</span></div><div class="kpi"><b>${adminUsers.length}</b><span>User accounts</span></div><div class="kpi"><b>${adminUsers.filter(u => !u.active).length}</b><span>Waiting approval</span></div><div class="kpi"><b>${cs}</b><span>Classes (${esc(S.school ? S.school.name : '')})</span></div><div class="kpi"><b>${ls}</b><span>Learners</span></div></div>
     <div class="card"><h2>Set-up checklist</h2>${steps.map(([ok, t, tab]) => `<div class="row" style="margin:6px 0"><span class="pill ${ok ? 'ok' : 'warn'}">${ok ? 'Done' : 'To do'}</span> ${esc(t)} ${tab && !ok ? `<button class="btn ghost sm" data-tab="${tab}">Go</button>` : ''}</div>`).join('')}</div>`;
   },
@@ -1676,8 +1683,8 @@ const ADMIN_TAB = {
     ${isSuper() ? `<select id="us">${optList(S.schools.map(s => [s.id, s.name]), ADMIN_F.school, 'All schools')}</select>` : ''}<select id="ust">${optList([['pending', 'Pending approval'], ['active', 'Active']], ADMIN_F.status, 'All statuses')}</select></div>
     <div class="tw"><table class="zebra"><thead><tr><th>NAME</th><th>EMAIL</th><th>PHONE</th><th>ROLE</th><th>SCHOOL</th><th>STATUS</th><th></th></tr></thead><tbody>
     ${list.map(u => `<tr><td><b>${esc(u.full_name)}</b></td><td>${esc(u.email)}</td><td>${esc(u.phone)}</td><td><span class="pill ${u.role === 'super_admin' ? 'bad' : u.role === 'school_admin' ? 'warn' : 'mute'}">${esc(u.role.replace('_', ' '))}</span></td><td>${esc(sName(u.school_id))}</td><td><span class="pill ${u.active ? 'ok' : 'warn'}">${u.active ? 'Active' : 'Pending'}</span></td>
-    <td><button class="btn ghost sm" data-eu="${u.id}">Edit</button> ${!u.active ? `<button class="btn gold sm" data-au="${u.id}">Approve</button>` : u.id !== S.profile.id ? `<button class="btn ghost sm" data-du="${u.id}">Deactivate</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted center">No users match.</td></tr>'}</tbody></table></div>
-    <p class="muted" style="margin-bottom:0">${LIVE ? 'People can also sign up themselves; they appear as <b>Pending</b> until you approve them and give them a school and role.' : 'Demo mode: users are created instantly.'}</p></div>`;
+    <td>${isAnc(u.id) ? '' : '<button class="btn ghost sm" data-eu="' + u.id + '">Edit</button>'} ${u.id !== S.profile.id && !isAnc(u.id) && (isSuper() || u.role === 'teacher') ? '<button class="btn ghost sm" data-xu="' + u.id + '">Delete</button>' : ''} ${!u.active ? `<button class="btn gold sm" data-au="${u.id}">Approve</button>` : u.id !== S.profile.id && !isAnc(u.id) ? `<button class="btn ghost sm" data-du="${u.id}">Deactivate</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="7" class="muted center">No users match.</td></tr>'}</tbody></table></div>
+    ${isSuper() ? '<p class="muted">Super administrators: <b>' + adminUsers.filter(u => u.role === 'super_admin').length + ' of 3</b>. A super administrator cannot remove or demote the one who added them.</p>' : ''}<p class="muted" style="margin-bottom:0">${LIVE ? 'People can also sign up themselves; they appear as <b>Pending</b> until you approve them and give them a school and role.' : 'Demo mode: users are created instantly.'}</p></div>`;
   },
   permissions: async () => {
     const admins = adminUsers.filter(u => u.role === 'school_admin'), sName = id => (S.schools.find(x => x.id === id) || {}).name || '—';
@@ -1696,6 +1703,7 @@ PAGE_AFTER.admin = el => {
   el.onclick = async e => {
     const t = e.target.closest('button'); if (!t) return; const d = t.dataset;
     if (d.tab) { adminTab = d.tab; return route(); }
+    if ((t.id === 'addS' || t.id === 'impS' || t.id === 'permSave' || d.es || d.ds || d.pset) && !isSuper()) return toast('Only the Ministry super administrator can do this', true);
     if (d.pset) { const [uid, on] = d.pset.split(':'); $$(`tr[data-uid="${uid}"] [data-p]`, el).forEach(c => c.checked = on === '1'); return; }
     if (t.id === 'permSave') return guard(async () => { const m = Object.assign({}, PERMS); $$('tr[data-uid]', el).forEach(tr => { m[tr.dataset.uid] = {}; $$('[data-p]', tr).forEach(c => m[tr.dataset.uid][c.dataset.p] = c.checked); }); await saveKind('perms', m); PERMS = m; await DB.audit('perms.edit', 'admin permissions updated'); toast('Permissions saved'); route(); });
     if (t.id === 'addS') modal({ title: 'Add school', wide: true, body: schoolForm(), onOk: async m => { const f = formData(m); if (!f.name) { toast('School name is required', true); return false; } const [s] = await DB.insert('schools', schoolPayload(f)); await DB.audit('school.add', f.name); if (!S.school) await setWorkingSchool(s.id); await refresh(); toast('School added'); } });
@@ -1705,13 +1713,15 @@ PAGE_AFTER.admin = el => {
     if (d.ds) { const s = S.schools.find(x => x.id === d.ds); modal({ title: 'Delete school', body: `<p><b>This permanently deletes ${esc(s.name)}</b> with all its classes, learners and results. Type the school name to confirm.</p><input id="delName" style="width:100%">`, ok: 'Delete forever', onOk: async () => { if ($('#delName').value.trim() !== s.name) { toast('Name does not match', true); return false; } await DB.remove('schools', s.id); await DB.audit('school.delete', s.name); if (S.school && S.school.id === s.id) S.school = null; await loadSchools(); S.school = S.schools[0] || null; if (S.school) await loadSchoolData(); renderShell(); route(); } }); }
     if (t.id === 'addU') modal({ title: 'Add user', wide: true, ok: 'Create user', body: userForm({ role: 'teacher' }, true), onOk: async m => {
       const f = formData(m); if (!f.full_name || !f.email || (f.password || '').length < 8) { toast('Name, email and a password of 8+ characters are required', true); return false; }
-      const school_id = isSuper() ? (f.school_id || null) : S.school.id; if (f.role !== 'super_admin' && !school_id) { toast('Choose a school', true); return false; }
-      if (LIVE) { const { data, error } = await sb.functions.invoke('admin-create-user', { body: { ...f, school_id } }); if (error || (data && data.error)) throw new Error((data && data.error) || 'Could not create the user. Deploy the "admin-create-user" Edge Function (see README, step 5), or ask the person to sign up and approve them here.'); }
+      if (f.role === 'super_admin' && adminUsers.filter(u => u.role === 'super_admin').length >= 3) { toast('Only 3 super administrators are allowed', true); return false; }
+      const school_id = isSuper() ? (f.school_id || null) : S.school.id; if (!['super_admin', 'ministry_admin'].includes(f.role) && !school_id) { toast('Choose a school', true); return false; }
+      if (LIVE) await createLiveUser({ ...f, school_id });
       else await DB.insert('profiles', { email: f.email, full_name: f.full_name, phone: f.phone, role: f.role, school_id, active: true });
       await DB.audit('user.add', `${f.email} (${f.role})`); await loadUsers(); S.staff = await DB.select('profiles', { school_id: S.school.id }); toast('User created'); route(); } });
-    if (d.eu) { const u = adminUsers.find(x => x.id === d.eu); modal({ title: 'Edit user', wide: true, body: userForm(u), onOk: async m => { const f = formData(m); const patch = { full_name: f.full_name, phone: f.phone || null, role: f.role, active: f.active }; if (isSuper()) patch.school_id = f.school_id || null; await DB.update('profiles', u.id, patch); await DB.audit('user.edit', u.email); S.staff = await DB.select('profiles', { school_id: S.school.id }); route(); } }); }
-    if (d.au) { const u = adminUsers.find(x => x.id === d.au); if (!u.school_id && !isSuper()) return toast('Not linked to a school', true); if (!u.school_id) { modal({ title: 'Approve user', body: `<p>Choose the school and role for <b>${esc(u.full_name)}</b>.</p><div class="field"><label>School</label><select name="school_id">${optList(S.schools.map(s => [s.id, s.name]), S.school && S.school.id)}</select></div><div class="field"><label>Role</label><select name="role">${optList([['teacher', 'Teacher'], ['school_admin', 'School administrator']], u.role)}</select></div>`, ok: 'Approve', onOk: async m => { const f = formData(m); await DB.update('profiles', u.id, { active: true, school_id: f.school_id, role: f.role }); await DB.audit('user.approve', u.email); S.staff = await DB.select('profiles', { school_id: S.school.id }); route(); } }); } else { await DB.update('profiles', u.id, { active: true }); await DB.audit('user.approve', u.email); route(); } }
-    if (d.du) { const u = adminUsers.find(x => x.id === d.du); if (await confirmBox(`Deactivate ${u.full_name}? They will no longer be able to sign in to the system.`, 'Deactivate')) guard(async () => { await DB.update('profiles', u.id, { active: false }); await DB.audit('user.deactivate', u.email); route(); }); }
+    if (d.eu) { const u = adminUsers.find(x => x.id === d.eu); modal({ title: 'Edit user', wide: true, body: userForm(u), onOk: async m => { const f = formData(m); if (isSuper()) { const patch = { full_name: f.full_name, phone: f.phone || null, role: f.role, active: f.active }; patch.school_id = f.school_id || null; await DB.update('profiles', u.id, patch); } else await manageUser(u.id, f.active ? 'approve' : 'deactivate', null, f.full_name, f.phone); await DB.audit('user.edit', u.email); S.staff = await DB.select('profiles', { school_id: S.school.id }); route(); } }); }
+    if (d.au) { const u = adminUsers.find(x => x.id === d.au); if (!u.school_id && !isSuper()) return toast('Not linked to a school', true); if (!u.school_id) { modal({ title: 'Approve user', body: `<p>Choose the school and role for <b>${esc(u.full_name)}</b>.</p><div class="field"><label>School</label><select name="school_id">${optList(S.schools.map(s => [s.id, s.name]), S.school && S.school.id)}</select></div><div class="field"><label>Role</label><select name="role">${optList([['teacher', 'Teacher'], ['school_admin', 'School administrator']], u.role)}</select></div>`, ok: 'Approve', onOk: async m => { const f = formData(m); await DB.update('profiles', u.id, { active: true, school_id: f.school_id, role: f.role }); await DB.audit('user.approve', u.email); S.staff = await DB.select('profiles', { school_id: S.school.id }); route(); } }); } else { await manageUser(u.id, 'approve'); await DB.audit('user.approve', u.email); route(); } }
+    if (d.xu) { const u = adminUsers.find(x => x.id === d.xu); if (await confirmBox(`Delete ${u.full_name} permanently? Their login will stop working.`, 'Delete')) guard(async () => { await manageUser(u.id, 'delete'); await DB.audit('user.delete', u.email); route(); }); }
+    if (d.du) { const u = adminUsers.find(x => x.id === d.du); if (await confirmBox(`Deactivate ${u.full_name}? They will no longer be able to sign in to the system.`, 'Deactivate')) guard(async () => { await manageUser(u.id, 'deactivate'); await DB.audit('user.deactivate', u.email); route(); }); }
   };
   const bind = (id, k) => { const x = $('#' + id, el); if (x) x.oninput = x.onchange = () => { ADMIN_F[k] = x.value; if (id === 'uq') { clearTimeout(bind.t); bind.t = setTimeout(() => route().then(() => { const q = $('#uq'); q && (q.focus(), q.setSelectionRange(q.value.length, q.value.length)); }), 250); } else route(); }; };
   bind('uq', 'q'); bind('ur', 'role'); bind('us', 'school'); bind('ust', 'status');
