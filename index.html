@@ -52,6 +52,12 @@ textarea{width:100%;min-height:80px}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
 .field{display:flex;flex-direction:column;gap:3px;margin-bottom:10px}.field label{font-size:12px;color:var(--mute);font-weight:600}
 .field.chk{flex-direction:row;align-items:center;gap:8px}
+.pw{position:relative;display:flex}.pw input{width:100%;padding-right:44px}
+.pw .eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;padding:6px 8px;color:var(--mute);display:flex;align-items:center;line-height:0}
+.pw .eye:hover,.pw .eye:focus-visible{color:var(--ink,#1a2540)}
+.pw .eye svg{width:20px;height:20px}
+.pw .eye .off{display:none}.pw .eye.on .off{display:block}.pw .eye.on .open{display:none}
+.pwmsg{font-size:12px;font-weight:600;min-height:16px;margin-top:2px}.pwmsg.ok{color:#15803d}.pwmsg.bad{color:#b91c1c}
 /* tables */
 .tw{overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
 table{border-collapse:collapse;width:100%}
@@ -703,6 +709,8 @@ async function setWorkingSchool(id) {
 }
 
 /* ---------------- AUTH ---------------- */
+const EYE_SVG = '<svg class="open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg><svg class="off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+const pwField = (id, label, ac) => `<div class="field"><label>${label}</label><div class="pw"><input id="${id}" type="password" autocomplete="${ac}"><button type="button" class="eye" data-eye="${id}" aria-label="Show password" title="Show / hide password">${EYE_SVG}</button></div></div>`;
 function authScreen(mode = 'login', msg = '') {
   if (!msg && S._libErr) msg = S._libErr;
   const demoBtns = !LIVE ? `<div class="note">Demo mode: Supabase is not configured, so data is stored only in this browser. Pick a role to explore.</div>
@@ -713,7 +721,7 @@ function authScreen(mode = 'login', msg = '') {
       <button class="btn gold" style="width:100%" id="a_login">Sign in</button>
       <p class="row" style="justify-content:space-between;margin-bottom:0"><a href="#" data-auth="signup">Create account</a><a href="#" data-auth="reset">Forgot password?</a></p>`,
     signup: `<div class="field"><label>Full name</label><input id="a_name"></div><div class="field"><label>Phone</label><input id="a_phone"></div><div class="field"><label>Your school *</label><select id="a_school"><option value="">Loading…</option></select></div>
-      <div class="field"><label>Email</label><input id="a_email" type="email"></div><div class="field"><label>Password (8+ characters)</label><input id="a_pass" type="password"></div>
+      <div class="field"><label>Email</label><input id="a_email" type="email"></div>${pwField('a_pass', 'Password (8+ characters)', 'new-password')}${pwField('a_pass2', 'Confirm password', 'new-password')}<div class="pwmsg" id="a_pwmsg" aria-live="polite"></div>
       <button class="btn gold" style="width:100%" id="a_signup">Create account</button><p><a href="#" data-auth="login">&larr; Back to sign in</a></p>`,
     reset: `<div class="field"><label>Email</label><input id="a_email" type="email"></div><button class="btn gold" style="width:100%" id="a_reset">Send reset link</button><p><a href="#" data-auth="login">&larr; Back</a></p>`
   }[mode];
@@ -756,6 +764,18 @@ function pendingScreen(p) {
   $('#root').innerHTML = `<div class="auth"><div class="box center"><h1>Email confirmed: awaiting approval</h1><p>Hello <b>${esc(p.full_name)}</b>. Your email (${esc(p.email)}) is confirmed. Your account is now waiting to be approved.</p>
   <p class="muted">Your school administrator will approve you. If that does not happen, ask the Ministry administrator to help.</p><button class="btn" id="a_out">Sign out</button></div></div>`;
 }
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-eye]'); if (!b) return;
+  const inp = document.getElementById(b.dataset.eye); if (!inp) return;
+  const show = inp.type === 'password'; inp.type = show ? 'text' : 'password';
+  b.classList.toggle('on', show); b.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+});
+document.addEventListener('input', e => {
+  if (e.target.id !== 'a_pass' && e.target.id !== 'a_pass2') return;
+  const m = document.getElementById('a_pwmsg'), a = document.getElementById('a_pass'), c = document.getElementById('a_pass2'); if (!m || !a || !c) return;
+  if (!c.value) { m.textContent = ''; m.className = 'pwmsg'; return; }
+  const ok = a.value === c.value; m.textContent = ok ? '\u2713 Passwords match' : '\u2717 Passwords do not match'; m.className = 'pwmsg ' + (ok ? 'ok' : 'bad');
+});
 document.addEventListener('click', async e => {
   const t = e.target.closest('[data-demo],[data-auth],#a_login,#a_signup,#a_reset,#a_out'); if (!t) return;
   if (t.dataset.demo) { lsSet('lme_demo_user', t.dataset.demo); return enterApp(demo.profiles.find(p => p.id === t.dataset.demo)); }
@@ -765,6 +785,7 @@ document.addEventListener('click', async e => {
     if (t.id === 'a_login') { const lk = secLocked(); if (lk) return authScreen('login', `Too many failed attempts. Try again in ${lk} minute(s).`); const { data, error } = await sb.auth.signInWithPassword({ email, password: pass }); if (error) { if (/not confirmed/i.test(error.message)) return authScreen('login', 'Please click the confirmation link we emailed you, then sign in again.'); secFail(email, 'sign-in'); return authScreen('login', error.message); } secOK(); afterLogin(data.user); }
     if (t.id === 'a_signup') {
       if ((pass || '').length < 8) return toast('Password must be 8+ characters', true);
+      if (pass !== (($('#a_pass2') || {}).value || '')) return toast('The two passwords do not match', true);
       const sch = ($('#a_school') || {}).value; if (!sch) return toast('Choose your school', true);
       const { data, error } = await sb.auth.signUp({ email, password: pass, options: { emailRedirectTo: location.href.split('#')[0], data: { full_name: $('#a_name').value, phone: $('#a_phone').value } } });
       if (error) return authScreen('signup', error.message);
